@@ -18,6 +18,17 @@ A local push-to-talk transcription tool for macOS using whisper.cpp, which compl
 - Homebrew (for installing dependencies)
 - Xcode command line tools
 
+## Quick Setup (Convenience Command)
+
+To run the app by simply typing `talk`, add this alias to your shell configuration:
+
+```bash
+echo 'alias talk="cd /Users/ianchan/code/talk && python3 push_to_talk.py"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Now you can start the app anytime by typing `talk` in your terminal!
+
 ## Installation
 
 1. **Clone whisper.cpp repository**:
@@ -70,6 +81,11 @@ To use a different model (e.g., base.en for better accuracy):
 ## Usage
 
 1. Start the push-to-talk service:
+   ```bash
+   talk
+   ```
+   
+   Or run directly:
    ```bash
    ./push_to_talk.py
    ```
