@@ -1,10 +1,11 @@
-# Push-to-Talk Transcription Tool
+# Talk Local - Push-to-Talk Voice Transcription
 
-A local push-to-talk transcription tool for macOS using whisper.cpp, which complies with Anthropic's approved software. This tool records audio when you hold down a keyboard shortcut and automatically types the transcribed text at your current cursor position.
+A local push-to-talk transcription tool for macOS using whisper.cpp, which complies with Anthropic's approved software. This tool records audio when you press a keyboard shortcut and automatically types the transcribed text at your current cursor position.
 
 ## Features
 
-- **Hotkey-triggered recording**: Hold Ctrl+Shift+R to start recording, release to stop and transcribe
+- **Hotkey-triggered recording**: Press Command+. to start/stop recording
+- **Toggle recording**: No need to hold keys - press once to start, press again to stop
 - **Automatic text insertion**: Transcribed text is automatically typed at your current cursor position
 - **Fast local transcription**: Uses whisper.cpp with optimized Apple Silicon support
 - **Privacy-focused**: All processing happens locally on your device
@@ -52,14 +53,14 @@ A local push-to-talk transcription tool for macOS using whisper.cpp, which compl
 ## Configuration
 
 The script uses the following default configuration:
-- **Hotkey**: Ctrl+Shift+R (hold to record, release to transcribe)
+- **Hotkey**: Command+. (press to toggle recording)
 - **Model**: tiny.en (fastest model for quick transcriptions)
 - **Sample rate**: 16,000 Hz
 - **Channels**: Mono
 
 To change the hotkey, edit the `HOTKEY_COMBO` variable in `push_to_talk.py`:
 ```python
-HOTKEY_COMBO = {Key.ctrl, Key.shift, keyboard.KeyCode.from_char('r')}
+HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
 ```
 
 To use a different model (e.g., base.en for better accuracy):
@@ -77,9 +78,9 @@ To use a different model (e.g., base.en for better accuracy):
 
 3. To transcribe:
    - Position your cursor where you want the text to appear
-   - Hold down Ctrl+Shift+R
+   - Press Command+. to start recording
    - Speak clearly into your microphone
-   - Release the keys
+   - Press Command+. again to stop recording
    - The transcribed text will be typed at your cursor position
 
 4. Press Ctrl+C to stop the service.
@@ -113,7 +114,7 @@ Make sure to grant these permissions for the tool to work properly.
 - All processing happens locally on your device
 - No audio data is sent to external servers
 - Temporary audio files are deleted immediately after transcription
-- The tool only operates when you hold the hotkey combination
+- The tool only operates when you press the hotkey combination
 
 ## License
 
