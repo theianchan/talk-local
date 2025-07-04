@@ -1,7 +1,7 @@
 #!/bin/bash
-# Build script for Push to Talk macOS app
+# Build script for Talk macOS app
 
-echo "Building Push to Talk macOS app..."
+echo "Building Talk macOS app..."
 
 # Check if virtual environment exists
 if [ ! -d "venv" ]; then
@@ -44,10 +44,10 @@ python setup.py py2app
 
 if [ $? -eq 0 ]; then
     echo "Build successful!"
-    echo "App bundle created at: dist/Push to Talk.app"
+    echo "App bundle created at: dist/Talk.app"
     echo ""
     echo "To run the app:"
-    echo "  open \"dist/Push to Talk.app\""
+    echo "  open \"dist/Talk.app\""
     echo ""
     echo "Note: The app will need permissions for:"
     echo "  - Microphone access (for recording)"

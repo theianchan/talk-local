@@ -11,11 +11,9 @@ Default hotkey: Command+.
 import sys
 import os
 import threading
-import time
 import wave
 import tempfile
 import subprocess
-import json
 import pyaudio
 import rumps
 from pynput import keyboard
@@ -23,18 +21,12 @@ from pynput.keyboard import Controller, Key
 from datetime import datetime
 import logging
 import traceback
-import fcntl
-import errno
 
 # Configuration
 HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
-# Alternative simpler hotkey for testing
-ALT_HOTKEY_COMBO = {keyboard.KeyCode.from_char('`')}  # Just backtick key
 WHISPER_MODELS = {
     "tiny.en": "whisper.cpp/models/ggml-tiny.en.bin",
-    # base.en model seems incompatible with current whisper.cpp build
-    # "base.en": "whisper.cpp/models/ggml-base.en.bin",
-    # Only include models that work - user can download more
+    # Additional models can be added here after downloading:
     # "small.en": "whisper.cpp/models/ggml-small.en.bin",
     # "medium.en": "whisper.cpp/models/ggml-medium.en.bin",
 }
@@ -46,7 +38,6 @@ CHANNELS = 1
 
 # App configuration
 APP_NAME = "Talk"
-APP_ICON = None  # Will use default microphone icon
 
 # Set up logging
 LOG_FILE = os.path.expanduser("~/Library/Logs/PushToTalk.log")
@@ -64,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 class PushToTalkApp(rumps.App):
     def __init__(self):
-        super(PushToTalkApp, self).__init__(APP_NAME, icon=APP_ICON, quit_button=None)
+        super(PushToTalkApp, self).__init__(APP_NAME, quit_button=None)
         logger.info("Initializing Push to Talk app")
         
         # Audio recording state
@@ -352,9 +343,9 @@ class PushToTalkApp(rumps.App):
             # Get current process ID
             current_pid = os.getpid()
             
-            # Find all push_to_talk_app.py processes
+            # Find all talk.py processes
             result = subprocess.run(
-                ["pgrep", "-f", "push_to_talk_app.py"],
+                ["pgrep", "-f", "talk.py"],
                 capture_output=True,
                 text=True
             )
@@ -368,8 +359,8 @@ class PushToTalkApp(rumps.App):
                         try:
                             os.kill(int(pid), 9)
                             killed.append(pid)
-                        except:
-                            pass
+                        except (OSError, ValueError) as e:
+                            logger.debug(f"Failed to kill PID {pid}: {e}")
                 
                 if killed:
                     msg = f"Killed {len(killed)} other instance(s)"
@@ -391,7 +382,6 @@ class PushToTalkApp(rumps.App):
             "Push to Talk Transcription",
             "A macOS menu bar app for voice transcription.\n\n"
             f"Hotkey: ⌘. (Command+Period)\n"
-            f"Alternative: ` (Backtick)\n"
             f"Current Model: {self.current_model}\n\n"
             "Powered by whisper.cpp"
         )
@@ -473,9 +463,7 @@ class PushToTalkApp(rumps.App):
             
             # Reset UI
             self.update_status("Cancelled")
-            # The menu item key doesn't change when we change the title
-            self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
-            self.menu["Cancel Recording (Esc)"].enabled = False
+            self._reset_recording_ui()
             
             self.show_notification("Recording Cancelled", "", "No text was transcribed")
             
@@ -487,101 +475,130 @@ class PushToTalkApp(rumps.App):
         else:
             logger.warning("cancel_recording called but not recording!")
     
+    def _reset_recording_ui(self):
+        """Reset UI state after recording stops."""
+        self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
+        self.menu["Cancel Recording (Esc)"].enabled = False
+    
     def stop_recording(self):
         """Stop recording and process the audio."""
         logger.info("stop_recording called")
-        if self.is_recording:
-            logger.info("Stopping recording...")
-            self.is_recording = False
-            self.recording_thread.join()
-            logger.info(f"Recording thread joined. Audio data size: {len(self.audio_data)} chunks")
-            
-            self.update_status("Processing...")
-            
-            # Save audio to temporary WAV file
-            temp_wav_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
-                    temp_wav_path = temp_wav.name
-                    logger.info(f"Creating WAV file at: {temp_wav_path}")
-                    
-                    with wave.open(temp_wav.name, 'wb') as wf:
-                        wf.setnchannels(CHANNELS)
-                        wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
-                        wf.setframerate(SAMPLE_RATE)
-                        audio_bytes = b''.join(self.audio_data)
-                        wf.writeframes(audio_bytes)
-                        logger.info(f"Wrote {len(audio_bytes)} bytes to WAV file")
-                
-                # Process with whisper.cpp
-                model_path = WHISPER_MODELS[self.current_model]
-                cmd = [
-                    WHISPER_EXECUTABLE,
-                    "-m", model_path,
-                    "-f", temp_wav_path,
-                    "-nt",  # no timestamps
-                    "-np"   # no prints (except results)
-                ]
-                
-                logger.info(f"Running whisper command: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                logger.debug(f"Whisper return code: {result.returncode}")
-                logger.debug(f"Whisper stdout: {result.stdout}")
-                if result.stderr:
-                    logger.debug(f"Whisper stderr: {result.stderr}")
-                
-                # Handle whisper errors
-                if result.returncode != 0:
-                    logger.error(f"Whisper failed with return code {result.returncode}")
-                    if "failed to initialize whisper context" in result.stderr:
-                        logger.error("Model initialization failed - model may be incompatible")
-                        self.show_notification("Transcription Error", "", f"Model {self.current_model} failed to load")
-                        # Fall back to tiny model
-                        logger.info("Falling back to tiny.en model")
-                        self.current_model = "tiny.en"
-                        self.set_model("tiny.en")
-                        return
-                
-                # Extract transcribed text
-                lines = result.stdout.strip().split('\n')
-                text = ""
-                for line in lines:
-                    if line and not (line.startswith('whisper_') or line.startswith('system_info') 
-                                   or line.startswith('main:') or line.startswith('[') 
-                                   or ':' in line[:10]):
-                        text += line.strip() + " "
-                
-                text = text.strip()
-                logger.info(f"Transcription result: '{text}'")
-                
-                if text:
-                    # Type the transcribed text with a space at the end
-                    self.keyboard_controller.type(text + " ")
-                    self.update_status("Transcribed")
-                    self.show_notification("Transcription Complete", "", text[:100] + "..." if len(text) > 100 else text)
-                else:
-                    self.update_status("No transcription")
-                    self.show_notification("No Transcription", "", "No speech detected")
-                    
-            except Exception as e:
-                logger.error(f"Error in stop_recording: {e}\n{traceback.format_exc()}")
-                self.update_status("Error")
-                self.show_notification("Transcription Error", "", str(e))
-            finally:
-                # Clean up the temporary file
-                if temp_wav_path and os.path.exists(temp_wav_path):
-                    logger.info(f"Cleaning up temp file: {temp_wav_path}")
-                    os.unlink(temp_wav_path)
-                
-                # Reset status after a delay
-                # Don't use threading.Timer as it creates a background thread
-                # Just reset immediately for now
-                self.update_status("Ready")
-                self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
-                self.menu["Cancel Recording (Esc)"].enabled = False
-        else:
+        if not self.is_recording:
             logger.warning("stop_recording called but not recording!")
+            return
+            
+        logger.info("Stopping recording...")
+        self.is_recording = False
+        self.recording_thread.join()
+        logger.info(f"Recording thread joined. Audio data size: {len(self.audio_data)} chunks")
+        
+        self.update_status("Processing...")
+        
+        # Save and transcribe audio
+        temp_wav_path = None
+        try:
+            temp_wav_path = self._save_audio_to_file()
+            result = self._transcribe_audio(temp_wav_path)
+            self._process_transcription_result(result)
+        except Exception as e:
+            logger.error(f"Error in stop_recording: {e}\n{traceback.format_exc()}")
+            self.update_status("Error")
+            self.show_notification("Transcription Error", "", str(e))
+        finally:
+            self._cleanup_recording(temp_wav_path)
+    
+    def _save_audio_to_file(self):
+        """Save recorded audio to a temporary WAV file."""
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
+            temp_wav_path = temp_wav.name
+            logger.info(f"Creating WAV file at: {temp_wav_path}")
+            
+            with wave.open(temp_wav.name, 'wb') as wf:
+                wf.setnchannels(CHANNELS)
+                wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
+                wf.setframerate(SAMPLE_RATE)
+                audio_bytes = b''.join(self.audio_data)
+                wf.writeframes(audio_bytes)
+                logger.info(f"Wrote {len(audio_bytes)} bytes to WAV file")
+            
+            return temp_wav_path
+    
+    def _transcribe_audio(self, wav_path):
+        """Transcribe audio file using whisper.cpp."""
+        model_path = WHISPER_MODELS[self.current_model]
+        cmd = [
+            WHISPER_EXECUTABLE,
+            "-m", model_path,
+            "-f", wav_path,
+            "-nt",  # no timestamps
+            "-np"   # no prints (except results)
+        ]
+        
+        logger.info(f"Running whisper command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        logger.debug(f"Whisper return code: {result.returncode}")
+        logger.debug(f"Whisper stdout: {result.stdout}")
+        if result.stderr:
+            logger.debug(f"Whisper stderr: {result.stderr}")
+        
+        return result
+    
+    def _process_transcription_result(self, result):
+        """Process the result from whisper transcription."""
+        # Handle whisper errors
+        if result.returncode != 0:
+            logger.error(f"Whisper failed with return code {result.returncode}")
+            if "failed to initialize whisper context" in result.stderr:
+                logger.error("Model initialization failed - model may be incompatible")
+                self.show_notification("Transcription Error", "", f"Model {self.current_model} failed to load")
+                # Fall back to tiny model
+                logger.info("Falling back to tiny.en model")
+                self.current_model = "tiny.en"
+                self.set_model("tiny.en")
+                return
+        
+        # Extract transcribed text
+        text = self._extract_text_from_whisper_output(result.stdout)
+        logger.info(f"Transcription result: '{text}'")
+        
+        if text:
+            # Type the transcribed text with a space at the end
+            try:
+                self.keyboard_controller.type(text + " ")
+                self.update_status("Transcribed")
+                self.show_notification("Transcription Complete", "", text[:100] + "..." if len(text) > 100 else text)
+            except Exception as e:
+                logger.error(f"Failed to type text: {e}")
+                self.show_notification("Type Error", "", "Failed to type the transcribed text")
+        else:
+            self.update_status("No transcription")
+            self.show_notification("No Transcription", "", "No speech detected")
+    
+    def _extract_text_from_whisper_output(self, output):
+        """Extract clean text from whisper output."""
+        lines = output.strip().split('\n')
+        text = ""
+        for line in lines:
+            if line and not (line.startswith('whisper_') or line.startswith('system_info') 
+                           or line.startswith('main:') or line.startswith('[') 
+                           or ':' in line[:10]):
+                text += line.strip() + " "
+        return text.strip()
+    
+    def _cleanup_recording(self, temp_wav_path):
+        """Clean up after recording and reset UI."""
+        # Clean up the temporary file
+        if temp_wav_path and os.path.exists(temp_wav_path):
+            logger.info(f"Cleaning up temp file: {temp_wav_path}")
+            try:
+                os.unlink(temp_wav_path)
+            except Exception as e:
+                logger.error(f"Failed to delete temp file: {e}")
+        
+        # Reset UI state
+        self.update_status("Ready")
+        self._reset_recording_ui()
     
     def on_press(self, key):
         """Handle key press events."""
@@ -594,7 +611,7 @@ class PushToTalkApp(rumps.App):
             
             self.current_keys.add(key)
             # Only log key presses if we're close to a hotkey combination
-            if self.debug_mode and (Key.cmd in self.current_keys or key == keyboard.KeyCode.from_char('`')):
+            if self.debug_mode and Key.cmd in self.current_keys:
                 logger.debug(f"Key pressed: {key}, current keys: {self.current_keys}")
             
             # Check for hotkey
@@ -605,16 +622,9 @@ class PushToTalkApp(rumps.App):
                     self.start_recording()
                 else:
                     self.stop_recording()
-            elif self.current_keys == ALT_HOTKEY_COMBO:
-                logger.info("Alternative hotkey (`) detected!")
-                # Toggle recording on alternative hotkey
-                if not self.is_recording:
-                    self.start_recording()
-                else:
-                    self.stop_recording()
             elif self.debug_mode and len(self.current_keys) > 1:
                 # Only log multi-key combinations in debug mode to reduce noise
-                logger.debug(f"Keys pressed: {self.current_keys}, Expected: {HOTKEY_COMBO} or {ALT_HOTKEY_COMBO}")
+                logger.debug(f"Keys pressed: {self.current_keys}, Expected: {HOTKEY_COMBO}")
         except AttributeError:
             pass
         except Exception as e:
@@ -639,6 +649,9 @@ class PushToTalkApp(rumps.App):
 
 def acquire_lock():
     """Ensure only one instance of the app is running."""
+    import fcntl
+    import errno
+    
     lock_file = os.path.expanduser("~/.push_to_talk.lock")
     try:
         # Try to acquire an exclusive lock
@@ -670,7 +683,8 @@ if __name__ == "__main__":
                 "osascript", "-e",
                 'display notification "Talk is already running in the menu bar" with title "Talk"'
             ])
-        except:
+        except Exception:
+            # Notification is not critical, so we can silently fail
             pass
         sys.exit(0)
     

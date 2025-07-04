@@ -9,7 +9,7 @@ from setuptools import setup
 import os
 import shutil
 
-APP = ['push_to_talk_app.py']
+APP = ['talk.py']
 DATA_FILES = []
 
 # Include whisper.cpp executable and models
@@ -32,9 +32,9 @@ OPTIONS = {
     'argv_emulation': False,
     'iconfile': None,  # Will add icon later
     'plist': {
-        'CFBundleName': 'Push to Talk',
-        'CFBundleDisplayName': 'Push to Talk',
-        'CFBundleIdentifier': 'com.example.push-to-talk',
+        'CFBundleName': 'Talk',
+        'CFBundleDisplayName': 'Talk',
+        'CFBundleIdentifier': 'com.talk.app',
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'LSUIElement': True,  # Hide from dock (menu bar app)

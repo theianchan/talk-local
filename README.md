@@ -1,13 +1,16 @@
-# Talk Local - Push-to-Talk Voice Transcription
+# Talk - Push-to-Talk Voice Transcription Menu Bar App
 
-A local push-to-talk transcription tool for macOS using whisper.cpp, which complies with Anthropic's approved software. This tool records audio when you press a keyboard shortcut and automatically types the transcribed text at your current cursor position.
+A native macOS menu bar application for push-to-talk voice transcription using whisper.cpp. This tool records audio when you press a keyboard shortcut and automatically types the transcribed text at your current cursor position.
 
 ## Features
 
-- **Hotkey-triggered recording**: Press Command+. to start/stop recording
-- **Toggle recording**: No need to hold keys - press once to start, press again to stop
-- **Automatic text insertion**: Transcribed text is automatically typed at your current cursor position
-- **Fast local transcription**: Uses whisper.cpp with optimized Apple Silicon support
+- **Menu Bar App**: Runs in the menu bar, no terminal window needed
+- **Push-to-Talk**: Press Command+. to start/stop recording
+- **Escape to Cancel**: Press Escape while recording to cancel without transcribing
+- **Model Selection**: Choose between different Whisper models from the menu
+- **Status Indicators**: Visual feedback for recording and processing states
+- **Native Notifications**: macOS notifications for transcription results
+- **Auto-Type**: Transcribed text is automatically typed at cursor position
 - **Privacy-focused**: All processing happens locally on your device
 - **Works system-wide**: Can be used in any application
 
@@ -20,14 +23,14 @@ A local push-to-talk transcription tool for macOS using whisper.cpp, which compl
 
 ## Quick Setup (Convenience Command)
 
-To run the app by simply typing `talk`, add this alias to your shell configuration:
+To run the app by simply typing `t`, add this alias to your shell configuration:
 
 ```bash
-echo 'alias talk="cd /Users/ianchan/code/talk && python3 push_to_talk.py"' >> ~/.zshrc
+echo 'alias t="cd ~/code/talk && python3 talk.py"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-Now you can start the app anytime by typing `talk` in your terminal!
+Now you can start the app anytime by typing `t` in your terminal!
 
 ## Installation
 
@@ -63,59 +66,99 @@ Now you can start the app anytime by typing `talk` in your terminal!
 
 ## Configuration
 
-The script uses the following default configuration:
+The app uses the following default configuration:
 - **Hotkey**: Command+. (press to toggle recording)
-- **Model**: tiny.en (fastest model for quick transcriptions)
+- **Cancel**: Escape key (while recording)
+- **Default Model**: tiny.en (fastest model for quick transcriptions)
 - **Sample rate**: 16,000 Hz
 - **Channels**: Mono
 
-To change the hotkey, edit the `HOTKEY_COMBO` variable in `push_to_talk.py`:
-```python
-HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
-```
+### Available Models
+- **tiny.en**: Fastest, least accurate (default)
+- **small.en**: Balanced speed and accuracy
+- **medium.en**: Slower, more accurate
 
-To use a different model (e.g., base.en for better accuracy):
-1. Download the desired model: `cd models && ./download-ggml-model.sh base.en`
-2. Update `WHISPER_MODEL_PATH` in the script to point to the new model
+To use additional models:
+1. Download the desired model:
+   ```bash
+   cd whisper.cpp/models
+   ./download-ggml-model.sh small.en
+   ./download-ggml-model.sh medium.en
+   ```
+2. Edit `WHISPER_MODELS` in `talk.py` to uncomment the model
+3. Select the model from the menu bar app's Model menu
 
 ## Usage
 
-1. Start the push-to-talk service:
+1. Start the app:
    ```bash
-   talk
+   t
    ```
    
    Or run directly:
    ```bash
-   ./push_to_talk.py
+   python3 talk.py
    ```
 
-2. The service will start and wait for the hotkey combination.
+2. The app icon will appear in your menu bar (top-right of screen).
 
 3. To transcribe:
    - Position your cursor where you want the text to appear
-   - Press Command+. to start recording
+   - Press **Command+.** to start recording (menu bar icon turns red)
    - Speak clearly into your microphone
-   - Press Command+. again to stop recording
+   - Press **Command+.** again to stop recording and transcribe
+   - Or press **Escape** to cancel recording without transcribing
    - The transcribed text will be typed at your cursor position
 
-4. Press Ctrl+C to stop the service.
+4. To quit: Click the menu bar icon → Quit
+
+### Menu Options
+
+- **Status**: Shows current app state (Ready, Recording, Processing)
+- **Start/Stop Recording**: Alternative to hotkey
+- **Cancel Recording**: Available while recording (or press Escape)
+- **Model**: Select which Whisper model to use
+- **Debug**: Troubleshooting tools
+- **About**: App information
+- **Quit**: Exit the application
 
 ## macOS Permissions
 
-The first time you run this tool, macOS may ask for:
-- Microphone access (for recording audio)
-- Accessibility permissions (for simulating keyboard input)
+The first time you run this tool, macOS will ask for:
 
-Make sure to grant these permissions for the tool to work properly.
+1. **Microphone Access**: Required for recording audio
+2. **Accessibility Access**: Required for keyboard monitoring and typing text
+   - Go to System Settings → Privacy & Security → Accessibility
+   - Add Terminal (or your terminal app) to the allowed list
+   - Enable the toggle for your terminal
+
+### Troubleshooting Permissions
+
+If hotkeys don't work:
+1. Open the Debug menu in the app
+2. Click "Test Hotkey Detection"
+3. Follow the instructions in the dialog
 
 ## Troubleshooting
 
-1. **"Whisper executable not found"**: Make sure you built whisper.cpp successfully
-2. **"Model not found"**: Download the model using the provided script
-3. **No audio recorded**: Check microphone permissions in System Preferences
-4. **Text not typing**: Grant accessibility permissions to Terminal/your IDE
-5. **Poor transcription quality**: Try using a better model like small.en or medium.en
+1. **App doesn't appear in menu bar**: Look in the top-right corner, not the dock
+2. **"Another instance is already running"**: The app prevents duplicates. Check your menu bar for existing instance
+3. **Hotkey doesn't work**: 
+   - Grant accessibility permissions to Terminal in System Settings
+   - Use Debug → Test Hotkey Detection
+   - Try using the menu button instead
+4. **"Model not found"**: Download the model using the whisper.cpp download script
+5. **No audio recorded**: Check microphone permissions in System Settings
+6. **Text not typing**: Ensure accessibility permissions are granted
+7. **Poor transcription quality**: Switch to a better model like small.en or medium.en from the Model menu
+
+### Debug Tools
+
+The app includes several debug features:
+- **Toggle Debug Mode**: Enables detailed logging
+- **View Logs**: Opens the log file (`~/Library/Logs/PushToTalk.log`)
+- **Test Audio**: Verifies audio system is working
+- **Test Hotkey Detection**: Checks if keyboard monitoring is working
 
 ## Performance Notes
 
