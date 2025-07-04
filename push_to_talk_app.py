@@ -23,6 +23,8 @@ from pynput.keyboard import Controller, Key
 from datetime import datetime
 import logging
 import traceback
+import fcntl
+import errno
 
 # Configuration
 HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
@@ -103,7 +105,9 @@ class PushToTalkApp(rumps.App):
             rumps.MenuItem("View Logs", callback=self.view_logs),
             rumps.MenuItem("Clear Logs", callback=self.clear_logs),
             rumps.MenuItem("Test Audio", callback=self.test_audio),
-            rumps.MenuItem("Test Hotkey Detection", callback=self.test_hotkey)
+            rumps.MenuItem("Test Hotkey Detection", callback=self.test_hotkey),
+            rumps.separator,
+            rumps.MenuItem("Kill All Instances", callback=self.kill_all_instances)
         ]
         self.menu["Debug"].update(debug_menu)
         
@@ -317,6 +321,45 @@ class PushToTalkApp(rumps.App):
             )
             rumps.alert("Permission Required", msg)
     
+    def kill_all_instances(self, _):
+        """Kill all running instances of the app."""
+        try:
+            # Get current process ID
+            current_pid = os.getpid()
+            
+            # Find all push_to_talk_app.py processes
+            result = subprocess.run(
+                ["pgrep", "-f", "push_to_talk_app.py"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                killed = []
+                
+                for pid in pids:
+                    if pid and int(pid) != current_pid:
+                        try:
+                            os.kill(int(pid), 9)
+                            killed.append(pid)
+                        except:
+                            pass
+                
+                if killed:
+                    msg = f"Killed {len(killed)} other instance(s)"
+                    logger.info(f"Killed PIDs: {killed}")
+                else:
+                    msg = "No other instances found"
+            else:
+                msg = "No other instances found"
+            
+            rumps.alert("Kill All Instances", msg)
+            
+        except Exception as e:
+            logger.error(f"Failed to kill instances: {e}")
+            rumps.alert("Error", f"Failed to kill instances: {str(e)}")
+    
     def about(self, _):
         """Show about dialog."""
         rumps.alert(
@@ -519,6 +562,21 @@ class PushToTalkApp(rumps.App):
         self.keyboard_listener.start()
         logger.info("Keyboard listener started")
 
+def acquire_lock():
+    """Ensure only one instance of the app is running."""
+    lock_file = os.path.expanduser("~/.push_to_talk.lock")
+    try:
+        # Try to acquire an exclusive lock
+        lock_fd = os.open(lock_file, os.O_CREAT | os.O_WRONLY)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except IOError as e:
+        if e.errno == errno.EAGAIN or e.errno == errno.EACCES:
+            # Another instance is running
+            return None
+        else:
+            raise
+
 if __name__ == "__main__":
     logger.info("="*50)
     logger.info("Push to Talk app starting...")
@@ -526,9 +584,28 @@ if __name__ == "__main__":
     logger.info(f"Python version: {sys.version}")
     logger.info("="*50)
     
+    # Check for existing instance
+    lock_fd = acquire_lock()
+    if lock_fd is None:
+        logger.warning("Another instance is already running!")
+        print("Push to Talk is already running. Check your menu bar.")
+        # Show a notification if possible
+        try:
+            subprocess.run([
+                "osascript", "-e",
+                'display notification "Push to Talk is already running in the menu bar" with title "Push to Talk"'
+            ])
+        except:
+            pass
+        sys.exit(0)
+    
     try:
         app = PushToTalkApp()
         app.run()
     except Exception as e:
         logger.error(f"Fatal error: {e}\n{traceback.format_exc()}")
         raise
+    finally:
+        # Release the lock when exiting
+        if lock_fd:
+            os.close(lock_fd)
