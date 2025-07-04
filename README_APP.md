@@ -30,27 +30,26 @@ A native macOS menu bar application for push-to-talk voice transcription using w
    cd ..
    ```
 
-## Building the App
+## Running the App
 
-1. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Option 1: Terminal Alias (Recommended)
+Add this alias to your `~/.zshrc` or `~/.bash_profile`:
+```bash
+alias t="cd ~/code/talk && python push_to_talk_app.py"
+```
 
-2. **Build the app bundle**:
-   ```bash
-   ./build_app.sh
-   ```
+Then simply type `t` in any terminal to start the app.
 
-   Or manually:
-   ```bash
-   python setup.py py2app
-   ```
+### Option 2: Direct Run
+```bash
+python push_to_talk_app.py
+```
 
-3. **Run the app**:
-   ```bash
-   open "dist/Push to Talk.app"
-   ```
+### Option 3: Build App Bundle (if py2app available)
+```bash
+./build_app.sh
+open "dist/Push to Talk.app"
+```
 
 ## First Run Permissions
 
