@@ -32,9 +32,11 @@ HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
 ALT_HOTKEY_COMBO = {keyboard.KeyCode.from_char('`')}  # Just backtick key
 WHISPER_MODELS = {
     "tiny.en": "whisper.cpp/models/ggml-tiny.en.bin",
-    "base.en": "whisper.cpp/models/ggml-base.en.bin",
-    "small.en": "whisper.cpp/models/ggml-small.en.bin",
-    "medium.en": "whisper.cpp/models/ggml-medium.en.bin",
+    # base.en model seems incompatible with current whisper.cpp build
+    # "base.en": "whisper.cpp/models/ggml-base.en.bin",
+    # Only include models that work - user can download more
+    # "small.en": "whisper.cpp/models/ggml-small.en.bin",
+    # "medium.en": "whisper.cpp/models/ggml-medium.en.bin",
 }
 DEFAULT_MODEL = "tiny.en"
 WHISPER_EXECUTABLE = "whisper.cpp/build/bin/whisper-cli"
@@ -118,10 +120,11 @@ class PushToTalkApp(rumps.App):
         # Create model submenu
         model_menu = []
         for model_name in WHISPER_MODELS.keys():
-            item = rumps.MenuItem(
-                model_name, 
-                callback=lambda sender, model=model_name: self.set_model(model)
-            )
+            # Create a proper callback that captures the model name correctly
+            def make_callback(m):
+                return lambda sender: self.set_model(m)
+            
+            item = rumps.MenuItem(model_name, callback=make_callback(model_name))
             if model_name == self.current_model:
                 item.state = True
             model_menu.append(item)
@@ -202,17 +205,37 @@ class PushToTalkApp(rumps.App):
     
     def set_model(self, model_name):
         """Set the active model."""
-        # Update menu checkmarks
-        for item in self.menu["Model"]:
-            item.state = (item.title == model_name)
-        
-        self.current_model = model_name
-        self.update_status(f"Model: {model_name}")
-        
-        # Check if model exists
-        if not os.path.exists(WHISPER_MODELS[model_name]):
-            rumps.alert("Model Not Found", 
-                       f"Model {model_name} not found. Please download it first.")
+        try:
+            logger.info(f"set_model called with: {model_name}")
+            logger.info(f"Current model before switch: {self.current_model}")
+            
+            # Update menu checkmarks
+            for item in self.menu["Model"].values():
+                # Only update state for actual MenuItem objects
+                if hasattr(item, 'state') and hasattr(item, 'title'):
+                    item.state = (item.title == model_name)
+            
+            # Actually change the model
+            old_model = self.current_model
+            self.current_model = model_name
+            logger.info(f"Model variable updated from {old_model} to {self.current_model}")
+            
+            self.update_status(f"Model: {model_name}")
+            
+            # Check if model exists
+            model_path = WHISPER_MODELS[model_name]
+            if not os.path.exists(model_path):
+                logger.error(f"Model not found at: {model_path}")
+                rumps.alert("Model Not Found", 
+                           f"Model {model_name} not found. Please download it first.")
+                # Revert to old model
+                self.current_model = old_model
+            else:
+                logger.info(f"Model switched successfully to: {model_path}")
+                self.show_notification("Model Changed", "", f"Now using {model_name} model")
+        except Exception as e:
+            logger.error(f"Error in set_model: {e}\n{traceback.format_exc()}")
+            rumps.alert("Error", f"Failed to switch model: {str(e)}")
     
     def toggle_recording(self, sender):
         """Toggle recording from menu."""
@@ -409,12 +432,9 @@ class PushToTalkApp(rumps.App):
                 # Update recording duration (skip UI update from background thread)
                 duration = (datetime.now() - start_time).seconds
                 # Don't update UI from background thread - it causes crashes
-                # Just log the duration
-                if self.debug_mode and duration % 5 == 0:
-                    logger.debug(f"Recording duration: {duration}s")
-                
-                if self.debug_mode and len(self.audio_data) % 10 == 0:
-                    logger.debug(f"Recorded {len(self.audio_data)} chunks, {duration}s elapsed")
+                # Only log significant milestones to reduce noise
+                if self.debug_mode and duration > 0 and duration % 10 == 0 and len(self.audio_data) % 10 == 1:
+                    logger.debug(f"Still recording... {duration}s elapsed")
                 
         except Exception as e:
             logger.error(f"Recording error: {e}\n{traceback.format_exc()}")
@@ -511,6 +531,18 @@ class PushToTalkApp(rumps.App):
                 if result.stderr:
                     logger.debug(f"Whisper stderr: {result.stderr}")
                 
+                # Handle whisper errors
+                if result.returncode != 0:
+                    logger.error(f"Whisper failed with return code {result.returncode}")
+                    if "failed to initialize whisper context" in result.stderr:
+                        logger.error("Model initialization failed - model may be incompatible")
+                        self.show_notification("Transcription Error", "", f"Model {self.current_model} failed to load")
+                        # Fall back to tiny model
+                        logger.info("Falling back to tiny.en model")
+                        self.current_model = "tiny.en"
+                        self.set_model("tiny.en")
+                        return
+                
                 # Extract transcribed text
                 lines = result.stdout.strip().split('\n')
                 text = ""
@@ -524,8 +556,8 @@ class PushToTalkApp(rumps.App):
                 logger.info(f"Transcription result: '{text}'")
                 
                 if text:
-                    # Type the transcribed text
-                    self.keyboard_controller.type(text)
+                    # Type the transcribed text with a space at the end
+                    self.keyboard_controller.type(text + " ")
                     self.update_status("Transcribed")
                     self.show_notification("Transcription Complete", "", text[:100] + "..." if len(text) > 100 else text)
                 else:
@@ -561,7 +593,8 @@ class PushToTalkApp(rumps.App):
                 return
             
             self.current_keys.add(key)
-            if self.debug_mode:
+            # Only log key presses if we're close to a hotkey combination
+            if self.debug_mode and (Key.cmd in self.current_keys or key == keyboard.KeyCode.from_char('`')):
                 logger.debug(f"Key pressed: {key}, current keys: {self.current_keys}")
             
             # Check for hotkey
@@ -579,8 +612,8 @@ class PushToTalkApp(rumps.App):
                     self.start_recording()
                 else:
                     self.stop_recording()
-            elif self.debug_mode and len(self.current_keys) >= 1:
-                # Log all key presses in debug mode
+            elif self.debug_mode and len(self.current_keys) > 1:
+                # Only log multi-key combinations in debug mode to reduce noise
                 logger.debug(f"Keys pressed: {self.current_keys}, Expected: {HOTKEY_COMBO} or {ALT_HOTKEY_COMBO}")
         except AttributeError:
             pass
