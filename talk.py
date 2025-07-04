@@ -21,6 +21,25 @@ from pynput.keyboard import Controller, Key
 from datetime import datetime
 import logging
 import traceback
+import platform
+
+# macOS-specific imports for priority hotkeys
+if platform.system() == 'Darwin':
+    try:
+        import Quartz
+        from Quartz import (
+            CGEventTapCreate, CGEventTapEnable, CGEventGetFlags, 
+            CGEventGetIntegerValueField, kCGEventKeyDown, kCGEventKeyUp,
+            kCGEventFlagsChanged, kCGSessionEventTap, kCGHeadInsertEventTap,
+            kCGEventTapOptionDefault, kCGKeyboardEventKeycode, 
+            kCGEventFlagMaskCommand, CFRunLoopAddSource, CFRunLoopGetCurrent,
+            CFMachPortCreateRunLoopSource, CFRunLoopRun, CFRunLoopStop
+        )
+        HAS_QUARTZ = True
+    except ImportError:
+        HAS_QUARTZ = False
+else:
+    HAS_QUARTZ = False
 
 # Configuration
 HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
@@ -68,6 +87,10 @@ class PushToTalkApp(rumps.App):
         self.keyboard_listener = None
         self.current_model = DEFAULT_MODEL
         self.debug_mode = False
+        
+        # Priority listener attributes for macOS
+        self.event_tap = None
+        self.priority_run_loop = None
         
         # Initialize PyAudio
         try:
@@ -390,8 +413,20 @@ class PushToTalkApp(rumps.App):
         """Quit the application."""
         if self.is_recording:
             self.stop_recording()
+        
+        # Clean up keyboard listeners
         if self.keyboard_listener:
             self.keyboard_listener.stop()
+        
+        # Clean up CGEventTap on macOS
+        if HAS_QUARTZ and self.event_tap:
+            try:
+                CGEventTapEnable(self.event_tap, False)
+                if self.priority_run_loop:
+                    CFRunLoopStop(self.priority_run_loop)
+            except Exception as e:
+                logger.error(f"Error cleaning up CGEventTap: {e}")
+        
         self.audio.terminate()
         rumps.quit_application()
     
@@ -640,12 +675,95 @@ class PushToTalkApp(rumps.App):
     def start_keyboard_listener(self):
         """Start the keyboard listener in a separate thread."""
         logger.info("Starting keyboard listener for hotkey: Command+.")
-        self.keyboard_listener = keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        )
-        self.keyboard_listener.start()
-        logger.info("Keyboard listener started")
+        
+        # On macOS, use CGEventTap for priority hotkey handling
+        if HAS_QUARTZ and platform.system() == 'Darwin':
+            logger.info("Using Quartz CGEventTap for priority hotkey handling")
+            threading.Thread(target=self._start_priority_listener, daemon=True).start()
+        else:
+            # Fallback to standard pynput listener
+            self.keyboard_listener = keyboard.Listener(
+                on_press=self.on_press,
+                on_release=self.on_release
+            )
+            self.keyboard_listener.start()
+            logger.info("Keyboard listener started")
+    
+    def _start_priority_listener(self):
+        """Start a priority keyboard listener using CGEventTap on macOS."""
+        try:
+            # Create an event tap
+            self.event_tap = CGEventTapCreate(
+                kCGSessionEventTap,
+                kCGHeadInsertEventTap,
+                kCGEventTapOptionDefault,
+                (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp) | (1 << kCGEventFlagsChanged),
+                self._handle_cg_event,
+                None
+            )
+            
+            if not self.event_tap:
+                logger.error("Failed to create CGEventTap - falling back to standard listener")
+                self.keyboard_listener = keyboard.Listener(
+                    on_press=self.on_press,
+                    on_release=self.on_release
+                )
+                self.keyboard_listener.start()
+                return
+            
+            # Create a run loop source and add it to the current run loop
+            run_loop_source = CFMachPortCreateRunLoopSource(None, self.event_tap, 0)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), run_loop_source, "kCFRunLoopDefaultMode")
+            
+            # Enable the event tap
+            CGEventTapEnable(self.event_tap, True)
+            
+            # Store the run loop for later stopping
+            self.priority_run_loop = CFRunLoopGetCurrent()
+            
+            logger.info("Priority keyboard listener started with CGEventTap")
+            
+            # Run the event loop
+            CFRunLoopRun()
+            
+        except Exception as e:
+            logger.error(f"Error starting priority listener: {e}\n{traceback.format_exc()}")
+            # Fallback to standard listener
+            self.keyboard_listener = keyboard.Listener(
+                on_press=self.on_press,
+                on_release=self.on_release
+            )
+            self.keyboard_listener.start()
+    
+    def _handle_cg_event(self, proxy, event_type, event, refcon):
+        """Handle CGEventTap events for priority hotkey detection."""
+        try:
+            if event_type == kCGEventKeyDown:
+                keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
+                flags = CGEventGetFlags(event)
+                
+                # Check for Escape key (keycode 53)
+                if keycode == 53 and self.is_recording:
+                    logger.info("Escape key pressed (priority handler) - cancelling recording")
+                    self.cancel_recording()
+                    return None  # Consume the event
+                
+                # Check for period key (keycode 47) with Command modifier
+                if keycode == 47 and (flags & kCGEventFlagMaskCommand):
+                    logger.info("Hotkey combo detected (priority handler)!")
+                    # Toggle recording
+                    if not self.is_recording:
+                        self.start_recording()
+                    else:
+                        self.stop_recording()
+                    return None  # Consume the event to prevent other apps from receiving it
+            
+            # For all other events, pass them through
+            return event
+            
+        except Exception as e:
+            logger.error(f"Error in CGEventTap handler: {e}\n{traceback.format_exc()}")
+            return event  # Pass through on error
 
 def acquire_lock():
     """Ensure only one instance of the app is running."""

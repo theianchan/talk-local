@@ -7,6 +7,7 @@ A native macOS menu bar application for push-to-talk voice transcription using w
 - **Menu Bar App**: Runs in the menu bar, no terminal window needed
 - **Push-to-Talk**: Press Command+. to start/stop recording
 - **Escape to Cancel**: Press Escape while recording to cancel without transcribing
+- **Priority Hotkeys**: Hotkeys take priority over other applications when Talk is running
 - **Model Selection**: Choose between different Whisper models from the menu
 - **Status Indicators**: Visual feedback for recording and processing states
 - **Native Notifications**: macOS notifications for transcription results
@@ -69,6 +70,7 @@ Now you can start the app anytime by typing `t` in your terminal!
 The app uses the following default configuration:
 - **Hotkey**: Command+. (press to toggle recording)
 - **Cancel**: Escape key (while recording)
+- **Priority Mode**: Hotkeys override other applications when Talk is active
 - **Default Model**: tiny.en (fastest model for quick transcriptions)
 - **Sample rate**: 16,000 Hz
 - **Channels**: Mono
@@ -147,10 +149,11 @@ If hotkeys don't work:
    - Grant accessibility permissions to Terminal in System Settings
    - Use Debug → Test Hotkey Detection
    - Try using the menu button instead
-4. **"Model not found"**: Download the model using the whisper.cpp download script
-5. **No audio recorded**: Check microphone permissions in System Settings
-6. **Text not typing**: Ensure accessibility permissions are granted
-7. **Poor transcription quality**: Switch to a better model like small.en or medium.en from the Model menu
+4. **Hotkey conflicts with other apps**: Talk now uses priority hotkeys that override other applications when it's running
+5. **"Model not found"**: Download the model using the whisper.cpp download script
+6. **No audio recorded**: Check microphone permissions in System Settings
+7. **Text not typing**: Ensure accessibility permissions are granted
+8. **Poor transcription quality**: Switch to a better model like small.en or medium.en from the Model menu
 
 ### Debug Tools
 
@@ -174,6 +177,7 @@ The app includes several debug features:
 - No audio data is sent to external servers
 - Temporary audio files are deleted immediately after transcription
 - The tool only operates when you press the hotkey combination
+- Priority hotkeys use macOS CGEventTap for system-wide keyboard monitoring
 
 ## License
 
