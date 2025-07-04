@@ -63,9 +63,21 @@ On first run, macOS will ask for permissions:
 ## Usage
 
 1. The app runs in the menu bar (look for "Push to Talk" in the top-right)
-2. Press **Command+.** to start recording
-3. Press **Command+.** again to stop and transcribe
+2. **Hotkey Recording**:
+   - Press **Command+.** (⌘.) to start recording
+   - Press **Command+.** again to stop and transcribe
+   - Alternative: Press **`** (backtick) to toggle recording
+3. **Menu Recording**:
+   - Click "Push to Talk" → "Start Recording"
+   - Click "Stop Recording" when done
 4. The transcribed text will be typed at your cursor position
+
+### Troubleshooting Hotkeys
+If hotkeys don't work:
+1. Go to System Settings → Privacy & Security → Accessibility
+2. Add Terminal (or your terminal app) to the allowed list
+3. Restart the app
+4. Use Debug → Test Hotkey Detection to verify
 
 ## Menu Options
 

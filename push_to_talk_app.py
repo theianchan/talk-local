@@ -26,6 +26,8 @@ import traceback
 
 # Configuration
 HOTKEY_COMBO = {Key.cmd, keyboard.KeyCode.from_char('.')}
+# Alternative simpler hotkey for testing
+ALT_HOTKEY_COMBO = {keyboard.KeyCode.from_char('`')}  # Just backtick key
 WHISPER_MODELS = {
     "tiny.en": "whisper.cpp/models/ggml-tiny.en.bin",
     "base.en": "whisper.cpp/models/ggml-base.en.bin",
@@ -85,7 +87,7 @@ class PushToTalkApp(rumps.App):
         self.menu = [
             rumps.MenuItem(f"Status: Ready", callback=None),
             rumps.separator,
-            rumps.MenuItem("Start Recording", callback=self.toggle_recording),
+            rumps.MenuItem("Start Recording (⌘.)", callback=self.toggle_recording),
             rumps.separator,
             rumps.MenuItem("Model", callback=None),
             rumps.separator,
@@ -100,7 +102,8 @@ class PushToTalkApp(rumps.App):
             rumps.MenuItem("Toggle Debug Mode", callback=self.toggle_debug),
             rumps.MenuItem("View Logs", callback=self.view_logs),
             rumps.MenuItem("Clear Logs", callback=self.clear_logs),
-            rumps.MenuItem("Test Audio", callback=self.test_audio)
+            rumps.MenuItem("Test Audio", callback=self.test_audio),
+            rumps.MenuItem("Test Hotkey Detection", callback=self.test_hotkey)
         ]
         self.menu["Debug"].update(debug_menu)
         
@@ -209,10 +212,10 @@ class PushToTalkApp(rumps.App):
         try:
             if not self.is_recording:
                 self.start_recording()
-                self.menu["Start Recording"].title = "Stop Recording"
+                self.menu["Start Recording (⌘.)"].title = "Stop Recording (⌘.)"
             else:
                 self.stop_recording()
-                self.menu["Start Recording"].title = "Start Recording"
+                self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
         except Exception as e:
             logger.error(f"Error in toggle_recording: {e}\n{traceback.format_exc()}")
             rumps.alert("Error", f"Recording error: {str(e)}")
@@ -269,12 +272,58 @@ class PushToTalkApp(rumps.App):
             logger.error(f"Audio test failed: {e}\n{traceback.format_exc()}")
             rumps.alert("Audio Test Failed", f"Error: {str(e)}")
     
+    def test_hotkey(self, _):
+        """Test hotkey detection."""
+        logger.info("Testing hotkey detection...")
+        
+        # Test if we have accessibility permissions
+        try:
+            # Simple test: try to create a keyboard listener
+            test_keys = []
+            
+            def test_press(key):
+                test_keys.append(str(key))
+                return False  # Stop listener
+            
+            # Try to create a test listener
+            test_listener = keyboard.Listener(on_press=test_press)
+            test_listener.start()
+            test_listener.stop()
+            
+            # If we get here, basic keyboard monitoring works
+            msg = (
+                "Keyboard monitoring is working!\n\n"
+                "To test the hotkey:\n"
+                "1. Enable Debug Mode\n"
+                "2. Press Command+.\n" 
+                "3. Check View Logs for results\n\n"
+                "Note: If hotkey doesn't work, check:\n"
+                "- System Settings → Privacy & Security → Accessibility\n"
+                "- Add Terminal to the allowed apps list"
+            )
+            
+            rumps.alert("Hotkey Test", msg)
+            logger.info("Keyboard listener test successful")
+            
+        except Exception as e:
+            logger.error(f"Keyboard test failed: {e}\n{traceback.format_exc()}")
+            msg = (
+                "❌ Keyboard monitoring failed!\n\n"
+                "Please grant accessibility permissions:\n"
+                "1. System Settings → Privacy & Security → Accessibility\n"
+                "2. Click the + button\n"
+                "3. Add Terminal (or your terminal app)\n"
+                "4. Restart this app"
+            )
+            rumps.alert("Permission Required", msg)
+    
     def about(self, _):
         """Show about dialog."""
         rumps.alert(
             "Push to Talk Transcription",
             "A macOS menu bar app for voice transcription.\n\n"
-            f"Hotkey: Command+.\n"
+            f"Hotkey: ⌘. (Command+Period)\n"
+            f"Alternative: ` (Backtick)\n"
             f"Current Model: {self.current_model}\n\n"
             "Powered by whisper.cpp"
         )
@@ -418,7 +467,7 @@ class PushToTalkApp(rumps.App):
                 # Reset status after a delay
                 def reset_ui():
                     self.update_status("Ready")
-                    self.menu["Start Recording"].title = "Start Recording"
+                    self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
                 threading.Timer(2.0, reset_ui).start()
         else:
             logger.warning("stop_recording called but not recording!")
@@ -430,6 +479,7 @@ class PushToTalkApp(rumps.App):
             if self.debug_mode:
                 logger.debug(f"Key pressed: {key}, current keys: {self.current_keys}")
             
+            # Check for hotkey
             if self.current_keys == HOTKEY_COMBO:
                 logger.info("Hotkey combo detected!")
                 # Toggle recording on hotkey press
@@ -437,6 +487,16 @@ class PushToTalkApp(rumps.App):
                     self.start_recording()
                 else:
                     self.stop_recording()
+            elif self.current_keys == ALT_HOTKEY_COMBO:
+                logger.info("Alternative hotkey (`) detected!")
+                # Toggle recording on alternative hotkey
+                if not self.is_recording:
+                    self.start_recording()
+                else:
+                    self.stop_recording()
+            elif self.debug_mode and len(self.current_keys) >= 1:
+                # Log all key presses in debug mode
+                logger.debug(f"Keys pressed: {self.current_keys}, Expected: {HOTKEY_COMBO} or {ALT_HOTKEY_COMBO}")
         except AttributeError:
             pass
         except Exception as e:
@@ -451,11 +511,13 @@ class PushToTalkApp(rumps.App):
     
     def start_keyboard_listener(self):
         """Start the keyboard listener in a separate thread."""
+        logger.info("Starting keyboard listener for hotkey: Command+.")
         self.keyboard_listener = keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
         )
         self.keyboard_listener.start()
+        logger.info("Keyboard listener started")
 
 if __name__ == "__main__":
     logger.info("="*50)
