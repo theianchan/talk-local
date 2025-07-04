@@ -43,7 +43,7 @@ CHUNK_SIZE = 512
 CHANNELS = 1
 
 # App configuration
-APP_NAME = "Push to Talk"
+APP_NAME = "Talk"
 APP_ICON = None  # Will use default microphone icon
 
 # Set up logging
@@ -90,6 +90,7 @@ class PushToTalkApp(rumps.App):
             rumps.MenuItem(f"Status: Ready", callback=None),
             rumps.separator,
             rumps.MenuItem("Start Recording (⌘.)", callback=self.toggle_recording),
+            rumps.MenuItem("Cancel Recording (Esc)", callback=lambda _: self.cancel_recording()),
             rumps.separator,
             rumps.MenuItem("Model", callback=None),
             rumps.separator,
@@ -98,6 +99,9 @@ class PushToTalkApp(rumps.App):
             rumps.MenuItem("About", callback=self.about),
             rumps.MenuItem("Quit", callback=self.quit_app)
         ]
+        
+        # Initially disable cancel option
+        self.menu["Cancel Recording (Esc)"].enabled = False
         
         # Create debug submenu
         debug_menu = [
@@ -210,16 +214,14 @@ class PushToTalkApp(rumps.App):
             rumps.alert("Model Not Found", 
                        f"Model {model_name} not found. Please download it first.")
     
-    def toggle_recording(self, _):
+    def toggle_recording(self, sender):
         """Toggle recording from menu."""
         logger.info(f"Toggle recording called. Current state: is_recording={self.is_recording}")
         try:
             if not self.is_recording:
                 self.start_recording()
-                self.menu["Start Recording (⌘.)"].title = "Stop Recording (⌘.)"
             else:
                 self.stop_recording()
-                self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
         except Exception as e:
             logger.error(f"Error in toggle_recording: {e}\n{traceback.format_exc()}")
             rumps.alert("Error", f"Recording error: {str(e)}")
@@ -404,9 +406,12 @@ class PushToTalkApp(rumps.App):
                 chunk = stream.read(CHUNK_SIZE, exception_on_overflow=False)
                 self.audio_data.append(chunk)
                 
-                # Update recording duration
+                # Update recording duration (skip UI update from background thread)
                 duration = (datetime.now() - start_time).seconds
-                self.update_status(f"Recording... {duration}s")
+                # Don't update UI from background thread - it causes crashes
+                # Just log the duration
+                if self.debug_mode and duration % 5 == 0:
+                    logger.debug(f"Recording duration: {duration}s")
                 
                 if self.debug_mode and len(self.audio_data) % 10 == 0:
                     logger.debug(f"Recorded {len(self.audio_data)} chunks, {duration}s elapsed")
@@ -426,11 +431,41 @@ class PushToTalkApp(rumps.App):
         logger.info("start_recording called")
         if not self.is_recording:
             logger.info("Starting new recording thread")
+            # Update UI before starting thread
+            self.update_status("Recording...")
+            self.menu["Start Recording (⌘.)"].title = "Stop Recording (⌘.)"
+            self.menu["Cancel Recording (Esc)"].enabled = True
+            
             self.recording_thread = threading.Thread(target=self.record_audio)
             self.recording_thread.start()
-            self.show_notification("Recording Started", "", "Press Command+. again to stop")
+            self.show_notification("Recording Started", "", "Press ⌘. to stop or Esc to cancel")
         else:
             logger.warning("start_recording called but already recording!")
+    
+    def cancel_recording(self):
+        """Cancel recording without transcription."""
+        logger.info("cancel_recording called")
+        if self.is_recording:
+            logger.info("Cancelling recording...")
+            self.is_recording = False
+            self.recording_thread.join()
+            logger.info(f"Recording cancelled. Discarded {len(self.audio_data)} audio chunks")
+            
+            # Reset UI
+            self.update_status("Cancelled")
+            # The menu item key doesn't change when we change the title
+            self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
+            self.menu["Cancel Recording (Esc)"].enabled = False
+            
+            self.show_notification("Recording Cancelled", "", "No text was transcribed")
+            
+            # Clear audio data
+            self.audio_data = []
+            
+            # Reset status to Ready after a moment
+            self.update_status("Ready")
+        else:
+            logger.warning("cancel_recording called but not recording!")
     
     def stop_recording(self):
         """Stop recording and process the audio."""
@@ -508,16 +543,23 @@ class PushToTalkApp(rumps.App):
                     os.unlink(temp_wav_path)
                 
                 # Reset status after a delay
-                def reset_ui():
-                    self.update_status("Ready")
-                    self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
-                threading.Timer(2.0, reset_ui).start()
+                # Don't use threading.Timer as it creates a background thread
+                # Just reset immediately for now
+                self.update_status("Ready")
+                self.menu["Start Recording (⌘.)"].title = "Start Recording (⌘.)"
+                self.menu["Cancel Recording (Esc)"].enabled = False
         else:
             logger.warning("stop_recording called but not recording!")
     
     def on_press(self, key):
         """Handle key press events."""
         try:
+            # Check for Escape key first (single key, not a combination)
+            if key == Key.esc and self.is_recording:
+                logger.info("Escape key pressed while recording - cancelling")
+                self.cancel_recording()
+                return
+            
             self.current_keys.add(key)
             if self.debug_mode:
                 logger.debug(f"Key pressed: {key}, current keys: {self.current_keys}")
@@ -588,12 +630,12 @@ if __name__ == "__main__":
     lock_fd = acquire_lock()
     if lock_fd is None:
         logger.warning("Another instance is already running!")
-        print("Push to Talk is already running. Check your menu bar.")
+        print("Talk is already running. Check your menu bar.")
         # Show a notification if possible
         try:
             subprocess.run([
                 "osascript", "-e",
-                'display notification "Push to Talk is already running in the menu bar" with title "Push to Talk"'
+                'display notification "Talk is already running in the menu bar" with title "Talk"'
             ])
         except:
             pass
